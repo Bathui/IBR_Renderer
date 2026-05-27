@@ -2,4 +2,4 @@ build/
 .vscode/
 *.pdf
 imgui.ini
-
+docs/static/videos/Demo_Vid.mp4
