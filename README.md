@@ -1,3 +1,3 @@
 # IBR Viewer
 
-[Project page](docs/index.html)
+[Project page](https://bathui.github.io/IBR_Renderer/)
