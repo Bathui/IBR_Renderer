@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="title" content="Depth-Image-Based 3D Warping Viewer">
+  <meta name="description" content="A real-time image-based rendering viewer that uses an RGB image and a depth map to synthesize small camera changes through textured proxy geometry.">
+  <meta name="keywords" content="image-based rendering, depth image based rendering, 3D warping, RGB-D, OpenGL, ImGui">
+  <meta name="author" content="YOUR_NAME">
+
+  <title>Depth-Image-Based 3D Warping Viewer</title>
+
+  <link rel="icon" type="image/x-icon" href="static/images/favicon.ico">
+  <link rel="stylesheet" href="static/css/bulma.min.css">
+  <link rel="stylesheet" href="static/css/index.css">
+  <link rel="preload" href="static/css/fontawesome.all.min.css" as="style" onload="this.onload=null;this.rel='stylesheet'">
+  <noscript>
+    <link rel="stylesheet" href="static/css/fontawesome.all.min.css">
+  </noscript>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <script defer src="static/js/fontawesome.all.min.js"></script>
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(', '\\)'], ['$', '$']] },
+      svg: { fontCache: 'global' }
+    };
+  </script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+
+<body>
+  <section class="hero">
+    <div class="hero-body">
+      <div class="container is-max-desktop has-text-centered">
+        <h1 class="title is-1">Depth-Image-Based 3D Warping Viewer</h1>
+        <p class="subtitle is-4">
+          Real-time image-based rendering from one RGB image and one depth image.
+        </p>
+        <p class="is-size-5">
+          Hui Cui
+        </p>
+
+        <div class="publication-links">
+          <span class="link-block">
+            <a href="#concept" class="external-link button is-normal is-rounded is-dark">
+              <span class="icon"><i class="fas fa-project-diagram"></i></span>
+              <span>Concept</span>
+            </a>
+          </span>
+          <span class="link-block">
+            <a href="#demo" class="external-link button is-normal is-rounded is-dark">
+              <span class="icon"><i class="fas fa-video"></i></span>
+              <span>Demo</span>
+            </a>
+          </span>
+          <span class="link-block">
+            <a href="#future" class="external-link button is-normal is-rounded is-dark">
+              <span class="icon"><i class="fas fa-forward"></i></span>
+              <span>Future Work</span>
+            </a>
+          </span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="demo">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Demo Video</h2>
+      <video controls style="width: 100%; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.18);">
+        <source src="../Demo/Demo_Vid.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+      <p class="has-text-centered mt-3">
+        <span class="tag is-info is-light">First milestone video of the current progress</span>
+      </p>
+    </div>
+  </section>
+
+  <section class="section" id="introduction">
+    <div class="container is-max-desktop">
+      <div class="columns is-centered has-text-centered">
+        <div class="column is-four-fifths">
+          <h2 class="title is-3">Introduction</h2>
+          <div class="content has-text-justified">
+            <p>
+              This project is an image-based rendering viewer for creating a simple 3D warping effect from
+              a single RGB image and its corresponding depth image. Instead of modeling a scene from scratch,
+              the viewer reuses image data and a proxy depth surface to synthesize nearby camera views.
+            </p>
+            <p>
+              The current system can load RGB/depth image pairs, display the warped result in real time,
+              edit the depth map with a brush, adjust camera parameters, tune mesh resolution, remove triangles
+              near depth discontinuities, and choose the background color for missing regions.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="results">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Milestone 1 results showcase</h2>
+
+      <div class="columns is-centered">
+        <div class="column">
+          <figure class="image">
+            <img src="../Demo/mushrooms.jpeg" alt="Input RGB image">
+          </figure>
+          <p class="has-text-centered"><strong>Input RGB image</strong></p>
+        </div>
+        <div class="column">
+          <figure class="image">
+            <img src="../Demo/mushrooms_depth.png" alt="Input depth map">
+          </figure>
+          <p class="has-text-centered"><strong>Input depth map</strong></p>
+        </div>
+      </div>
+
+      <div class="has-text-centered my-5">
+        <span class="icon is-large has-text-link" style="font-size: 2.5rem;">
+          <i class="fas fa-arrow-down"></i>
+        </span>
+      </div>
+
+      <div class="columns is-centered">
+        <div class="column is-two-thirds">
+          <figure class="image">
+            <img src="../Demo/mushroom_warp.png" alt="Warped mushroom result">
+          </figure>
+          <p class="has-text-centered"><strong>Warped rendering result</strong></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="concept">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Conceptual Idea</h2>
+      <div class="content has-text-justified">
+        <p>
+          The core idea is depth-image-based rendering. For every image sample, the RGB image provides color
+          and the depth image provides a rough 3D position. A pixel coordinate \((u, v)\) is mapped to a point
+          on a proxy surface:
+        </p>
+        <p>
+          \[
+            \mathbf{p}(u,v) =
+            \begin{bmatrix}
+              (u - 0.5)a \\
+              0.5 - v \\
+              sD(u,v) + b
+            \end{bmatrix},
+          \]
+        </p>
+        <p>
+          where \(a\) is the image aspect ratio, \(D(u,v) \in [0,1]\) is the depth value, \(s\) is the depth
+          scale, and \(b\) is the depth bias. The color of this point is sampled directly from the original
+          image:
+        </p>
+        <p>
+          \[
+            \mathbf{c}(u,v) = I(u,v).
+          \]
+        </p>
+        <p>
+          The proxy mesh is then rendered from a virtual camera using a standard model-view-projection transform:
+        </p>
+        <p>
+          \[
+            \mathbf{x}_{clip} = PVM
+            \begin{bmatrix}
+              \mathbf{p}(u,v) \\
+              1
+            \end{bmatrix}.
+          \]
+        </p>
+        <p>
+          To reduce unnatural stretching, the mesh removes triangles whose depths differ too much. For a triangle
+          with vertex depths \(d_1,d_2,d_3\), the triangle is kept only if
+        </p>
+        <p>
+          \[
+            \max(d_1,d_2,d_3) - \min(d_1,d_2,d_3) \le \tau,
+          \]
+        </p>
+        <p>
+          where \(\tau\) is the depth tear threshold. This creates holes at strong depth discontinuities instead
+          of stretching foreground texture into the background.
+        </p>
+
+        <h3 class="title is-4">Pipeline</h3>
+        <ol>
+          <li><strong>Input:</strong> load one RGB image and one aligned grayscale depth image.</li>
+          <li><strong>Depth conversion:</strong> convert depth image luminance into normalized depth values.</li>
+          <li><strong>Proxy mesh:</strong> sample a regular grid and displace vertices according to depth.</li>
+          <li><strong>Artifact reduction:</strong> remove triangles across large depth discontinuities.</li>
+          <li><strong>Rendering:</strong> draw the textured mesh from a user-controlled virtual camera.</li>
+          <li><strong>Interaction:</strong> update the camera, mesh parameters, and depth edits through ImGui.</li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="implementation">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Implementation</h2>
+      <div class="content has-text-justified">
+        <p>
+          The program is written in C++ with OpenGL. The code is organized
+          into separate modules for image loading, depth-map editing, mesh construction, and rendering.
+          The main loop first checks whether the depth map or mesh needs to be updated, then renders the
+          current RGB-D mesh to an offscreen framebuffer before copying the result to the main window.
+        </p>
+        <ul>
+          <li><strong>ImageResource:</strong> loads images and uploads RGB textures to the GPU.</li>
+          <li><strong>DepthMap:</strong> stores depth values, supports loading, painting, smoothing, and preview export.</li>
+          <li><strong>DepthMesh:</strong> creates the displaced proxy mesh and removes triangles at depth discontinuities.</li>
+          <li><strong>WarpRenderer:</strong> renders the mesh to an offscreen framebuffer and displays it in the main window.</li>
+          <li><strong>Application:</strong> manages ImGui controls, file loading, and the main update loop.</li>
+        </ul>
+
+        <h3 class="title is-4">Depth Loading and Smoothing</h3>
+        <p>
+          The depth image is loaded as a normal image, but the viewer uses its luminance as the depth value.
+          For each pixel, brighter values become larger normalized depth values in \([0,1]\). The optional
+          invert setting flips this convention when a depth image uses the opposite meaning.
+        </p>
+        <p>
+          The <strong>Smooth current depth</strong> button applies a small local averaging filter to the current
+          depth map. This is useful when the depth image has noisy pixels that would create jagged geometry.
+          In simplified form, each updated depth value is computed from its neighborhood:
+        </p>
+        <p>
+          \[
+            D'(x,y) =
+            \frac{\sum_{i=-1}^{1}\sum_{j=-1}^{1} w_{ij}D(x+i,y+j)}
+                 {\sum_{i=-1}^{1}\sum_{j=-1}^{1} w_{ij}},
+          \]
+        </p>
+        <p>
+          where the center pixel receives a larger weight than its neighbors. This makes the surface smoother,
+          but it can also soften object boundaries, so it is best used lightly.
+        </p>
+
+        <h3 class="title is-4">Depth Sampling and Interpolation</h3>
+        <p>
+          The proxy mesh usually has fewer vertices than the full image has pixels. For example, a \(160 \times 120\)
+          mesh samples a much smaller grid than the original RGB/depth image. Because of this, the mesh does not
+          simply choose the nearest depth pixel. Instead, it uses bilinear interpolation from the four closest
+          depth samples:
+        </p>
+        <p>
+          \[
+            D(u,v) =
+            (1-t_x)(1-t_y)D_{00}
+            + t_x(1-t_y)D_{10}
+            + (1-t_x)t_yD_{01}
+            + t_xt_yD_{11}.
+          \]
+        </p>
+        <p>
+          This interpolation avoids blocky depth changes when the mesh resolution is lower than the depth image.
+          The RGB texture is also sampled smoothly by OpenGL during rendering, so the displayed result remains
+          continuous even though the geometry is a finite triangle mesh.
+        </p>
+
+        <h3 class="title is-4">Mesh Update and Rendering</h3>
+        <p>
+          After sampling the interpolated depth, each grid vertex is displaced along the \(z\)-axis using
+          depth scale and depth bias. The mesh stores both a 3D position and a UV coordinate, so the original
+          RGB image can be drawn directly onto the displaced surface. When sliders or brush edits change the
+          depth values, the mesh is rebuilt and uploaded to OpenGL again.
+        </p>
+        <p>
+          To reduce stretching artifacts, each grid cell is split into two triangles only when its vertex depths
+          are sufficiently similar. If a triangle crosses a strong depth jump, it is skipped. This creates cleaner
+          missing regions instead of long stretched texture streaks. Finally, the renderer draws the textured mesh
+          from the virtual camera controlled by yaw, pitch, zoom, pan, and field of view.
+        </p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Controls</h2>
+      <div class="content has-text-justified">
+        <ul>
+          <li><strong>Depth scale / bias:</strong> control how strongly the depth map displaces the mesh.</li>
+          <li><strong>Depth tear threshold:</strong> controls how aggressively triangles are removed at depth edges.</li>
+          <li><strong>Mesh columns / rows:</strong> control proxy mesh resolution.</li>
+          <li><strong>Yaw, pitch, zoom, pan, FOV:</strong> control the virtual camera.</li>
+          <li><strong>Depth brush:</strong> edits depth values interactively; right-drag smooths locally.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="future">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Future Additions</h2>
+      <div class="content has-text-justified">
+        <p>
+          Since this method starts from a single RGB-D view, it cannot recover surfaces that were hidden in the
+          original image. When the camera moves, newly visible regions appear as holes or stretched texture.
+          Triangle tearing makes these missing regions cleaner, but it does not fill them.
+        </p>
+        <ul>
+          <li>
+            <strong>Multi-image input:</strong> support several RGB/depth images captured from different angles.
+            This would provide more real scene information and reduce missing regions when the camera moves.
+          </li>
+          <li>
+            <strong>View interpolation:</strong> blend nearby input views based on the requested virtual camera,
+            which would make the result more accurate and realistic than relying on one image.
+          </li>
+          <li>
+            <strong>Layered depth representation:</strong> separate foreground and background layers to handle
+            object boundaries more cleanly.
+          </li>
+          <li>
+            <strong>Long-term neural extension:</strong> explore NeRF-like or Gaussian-splatting-style scene
+            representations if many calibrated images become available.
+          </li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Build and Run</h2>
+      <pre><code>cmake --build build --config release
+.\build\Release\IBR_Viewer.exe</code></pre>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">References</h2>
+      <div class="content">
+        <ul>
+          <li>Levoy and Hanrahan, <em>Light Field Rendering</em>, SIGGRAPH 1996.</li>
+          <li>Gortler et al., <em>The Lumigraph</em>, SIGGRAPH 1996.</li>
+          <li>Project-page framework adapted from the Academic Project Page Template.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <div class="container">
+      <div class="content has-text-centered">
+        <p>
+          Page framework adapted from
+          <a href="https://github.com/eliahuhorwitz/Academic-project-page-template">Academic Project Page Template</a>.
+        </p>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>
