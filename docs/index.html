@@ -26,6 +26,10 @@
     };
   </script>
   <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({ startOnLoad: true, theme: 'default' });
+  </script>
 </head>
 
 <body>
@@ -66,13 +70,19 @@
 
   <section class="section" id="demo">
     <div class="container is-max-desktop">
-      <h2 class="title is-3 has-text-centered">Demo Video</h2>
+      <h2 class="title is-3 has-text-centered">Final Demo Video</h2>
+      <video controls style="width: 100%; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.18); margin-bottom: 3rem;">
+        <source src="https://media.githubusercontent.com/media/Bathui/IBR_Renderer/main/Demo/demo_final.mp4" type="video/mp4">
+        Your browser does not support the video tag.
+      </video>
+
+      <h2 class="title is-3 has-text-centered">Milestone 1 Video</h2>
       <video controls style="width: 100%; border-radius: 8px; box-shadow: 0 10px 30px rgba(0,0,0,0.18);">
         <source src="https://media.githubusercontent.com/media/Bathui/IBR_Renderer/main/Demo/Demo_Vid.mp4" type="video/mp4">
         Your browser does not support the video tag.
       </video>
       <p class="has-text-centered mt-3">
-        <span class="tag is-info is-light">First milestone video of the current progress</span>
+        <span class="tag is-info is-light">First milestone video of the original progress</span>
       </p>
     </div>
   </section>
@@ -84,14 +94,14 @@
           <h2 class="title is-3">Introduction</h2>
           <div class="content has-text-justified">
             <p>
-              This project is an image-based rendering viewer for creating a simple 3D warping effect from
-              a single RGB image and its corresponding depth image. Instead of modeling a scene from scratch,
-              the viewer reuses image data and a proxy depth surface to synthesize nearby camera views.
+              This project is an image-based rendering viewer that creates a 3D warping effect from RGB-D data. 
+              Originally starting with single RGB/depth image pairs, it now supports multi-slab light fields. 
+              Instead of modeling a scene from scratch, the viewer reuses multi-view image data and proxy depth surfaces to synthesize novel camera views in real time.
             </p>
             <p>
-              The current system can load RGB/depth image pairs, display the warped result in real time,
-              edit the depth map with a brush, adjust camera parameters, tune mesh resolution, remove triangles
-              near depth discontinuities, and choose the background color for missing regions.
+              The current system can load single views or multi-slab bundles, compress textures using Vector Quantization (VQ), 
+              and seamlessly transition between different viewing angles using Bilinear and Quadrilinear interpolation modes. 
+              It also supports adjusting camera parameters, tuning mesh resolution, and removing triangles near depth discontinuities to reduce artifacts.
             </p>
           </div>
         </div>
@@ -130,6 +140,55 @@
             <img src="static/images/mushroom_warp.png" alt="Warped mushroom result">
           </figure>
           <p class="has-text-centered"><strong>Warped rendering result</strong></p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="final-results">
+    <div class="container is-max-desktop">
+      <h2 class="title is-3 has-text-centered">Final Version Results Showcase</h2>
+      <p class="has-text-centered mb-5">Multi-Slab Light Field blending with Quadrilinear Interpolation</p>
+
+      <div class="columns is-centered">
+        <div class="column">
+          <figure class="image">
+            <img src="static/images/dragon_front.png" alt="Front RGB image">
+          </figure>
+          <p class="has-text-centered"><strong>Primary Input (Front)</strong></p>
+        </div>
+        <div class="column">
+          <figure class="image">
+            <img src="static/images/dragon_front_depth.png" alt="Front depth map">
+          </figure>
+          <p class="has-text-centered"><strong>Primary Depth</strong></p>
+        </div>
+        <div class="column">
+          <figure class="image">
+            <img src="static/images/dragon_left.png" alt="Left RGB image">
+          </figure>
+          <p class="has-text-centered"><strong>Secondary Input (Left)</strong></p>
+        </div>
+        <div class="column">
+          <figure class="image">
+            <img src="static/images/dragon_left_depth.png" alt="Left depth map">
+          </figure>
+          <p class="has-text-centered"><strong>Secondary Depth</strong></p>
+        </div>
+      </div>
+
+      <div class="has-text-centered my-5">
+        <span class="icon is-large has-text-success" style="font-size: 2.5rem;">
+          <i class="fas fa-magic"></i>
+        </span>
+      </div>
+
+      <div class="columns is-centered">
+        <div class="column is-two-thirds">
+          <figure class="image">
+            <img src="static/images/dragon_warp.png" alt="Warped dragon result">
+          </figure>
+          <p class="has-text-centered"><strong>Blended Novel View Rendering</strong></p>
         </div>
       </div>
     </div>
@@ -190,15 +249,53 @@
           of stretching foreground texture into the background.
         </p>
 
+        <h3 class="title is-4">Multi-View Blending (Quadrilinear Interpolation)</h3>
+        <p>
+          To expand beyond a single view, the system supports <strong>multi-slab light fields</strong>. For a given virtual camera orientation, the renderer selects the two closest input slabs. Let their angular distances from the virtual camera be \(d_1\) and \(d_2\). The blend weight \(w\) for the secondary slab is computed as:
+        </p>
+        <p>
+          \[
+            w = \frac{d_1}{d_1 + d_2}.
+          \]
+        </p>
+        <p>
+          The final pixel color \(C\) is an alpha-blended combination of the warped primary slab \(C_1\) and secondary slab \(C_2\):
+        </p>
+        <p>
+          \[
+            C = (1 - w)C_1 + w C_2.
+          \]
+        </p>
+        <p>
+          Combined with bilinear spatial filtering on each proxy mesh, this cross-slab angular blending results in a smooth <strong>quadrilinear interpolation</strong> as the camera rotates.
+        </p>
+
+        <h3 class="title is-4">Vector Quantization (VQ) Compression</h3>
+        <p>
+          To manage memory efficiently when loading multiple RGB-D views, the system optionally employs Vector Quantization (VQ) texture compression. Instead of storing full 24-bit RGB colors, the image is divided into \(2 \times 2\) pixel blocks. Each block is assigned a single 8-bit index \(k\).
+        </p>
+        <p>
+          During rendering, the fragment shader decodes the color for a pixel at offset \((o_x, o_y) \in \{0,1\}^2\) within the block using a lookup into a 1D color codebook:
+        </p>
+        <p>
+          \[
+            \mathbf{c}(o_x, o_y) = \text{Codebook}[4k + 2o_y + o_x].
+          \]
+        </p>
+        <p>
+          This achieves a 12:1 compression ratio for the image data, drastically reducing GPU memory bandwidth while maintaining high visual fidelity.
+        </p>
+
         <h3 class="title is-4">Pipeline</h3>
-        <ol>
-          <li><strong>Input:</strong> load one RGB image and one aligned grayscale depth image.</li>
-          <li><strong>Depth conversion:</strong> convert depth image luminance into normalized depth values.</li>
-          <li><strong>Proxy mesh:</strong> sample a regular grid and displace vertices according to depth.</li>
-          <li><strong>Artifact reduction:</strong> remove triangles across large depth discontinuities.</li>
-          <li><strong>Rendering:</strong> draw the textured mesh from a user-controlled virtual camera.</li>
-          <li><strong>Interaction:</strong> update the camera, mesh parameters, and depth edits through ImGui.</li>
-        </ol>
+        <div class="mermaid" style="display: flex; justify-content: center;">
+graph TD
+    A["Input: Load single/multi-slab RGB-D views (VQ optional)"] --> B["Depth Conversion: Normalize depth values"]
+    B --> C["Proxy Mesh: Sample grid and displace vertices"]
+    C --> D["Artifact Reduction: Remove triangles at depth jumps"]
+    D --> E["Rendering & Blending: Decode VQ, warp, and blend slabs"]
+    E --> F["Interaction: ImGui camera & parameter updates"]
+    F -.->|Loop| A
+        </div>
       </div>
     </div>
   </section>
@@ -214,11 +311,12 @@
           current RGB-D mesh to an offscreen framebuffer before copying the result to the main window.
         </p>
         <ul>
-          <li><strong>ImageResource:</strong> loads images and uploads RGB textures to the GPU.</li>
+          <li><strong>ImageResource:</strong> loads standard RGB images or VQ-compressed codebooks/indices, uploading textures to the GPU.</li>
           <li><strong>DepthMap:</strong> stores depth values, supports loading, painting, smoothing, and preview export.</li>
-          <li><strong>DepthMesh:</strong> creates the displaced proxy mesh and removes triangles at depth discontinuities.</li>
-          <li><strong>WarpRenderer:</strong> renders the mesh to an offscreen framebuffer and displays it in the main window.</li>
-          <li><strong>Application:</strong> manages ImGui controls, file loading, and the main update loop.</li>
+          <li><strong>DepthMesh:</strong> creates the displaced proxy mesh and removes triangles at depth discontinuities using spatial bilinear filtering.</li>
+          <li><strong>LightFieldSlab:</strong> encapsulates a single RGB-D view (slab), its proxy mesh, and its original capture orientation.</li>
+          <li><strong>WarpRenderer:</strong> renders multiple slabs to offscreen framebuffers, handles VQ decoding, and performs quadrilinear blending before displaying the final result.</li>
+          <li><strong>Application:</strong> manages ImGui controls, multi-slab bundle loading, and the main update loop.</li>
         </ul>
 
         <h3 class="title is-4">Depth Loading and Smoothing</h3>
@@ -266,18 +364,16 @@
           continuous even though the geometry is a finite triangle mesh.
         </p>
 
-        <h3 class="title is-4">Mesh Update and Rendering</h3>
+        <h3 class="title is-4">Rendering and Cross-Slab Blending</h3>
         <p>
           After sampling the interpolated depth, each grid vertex is displaced along the \(z\)-axis using
           depth scale and depth bias. The mesh stores both a 3D position and a UV coordinate, so the original
-          RGB image can be drawn directly onto the displaced surface. When sliders or brush edits change the
+          RGB image (or VQ-decoded texture) can be drawn directly onto the displaced surface. When sliders or brush edits change the
           depth values, the mesh is rebuilt and uploaded to OpenGL again.
         </p>
         <p>
           To reduce stretching artifacts, each grid cell is split into two triangles only when its vertex depths
-          are sufficiently similar. If a triangle crosses a strong depth jump, it is skipped. This creates cleaner
-          missing regions instead of long stretched texture streaks. Finally, the renderer draws the textured mesh
-          from the virtual camera controlled by yaw, pitch, zoom, pan, and field of view.
+          are sufficiently similar. Finally, instead of simply drawing one mesh, the renderer evaluates the virtual camera's orientation against all loaded slabs. It selects the two closest slabs, warps them to the current perspective, and alpha-blends them using Quadrilinear interpolation. This provides a continuous, high-quality novel view without sudden transitions.
         </p>
       </div>
     </div>
@@ -288,11 +384,15 @@
       <h2 class="title is-3 has-text-centered">Controls</h2>
       <div class="content has-text-justified">
         <ul>
+          <li><strong>Multi-Slab Bundle Loading:</strong> browse and load a directory containing multiple RGB-D views (e.g., front, back, left, right).</li>
+          <li><strong>Use VQ Compression:</strong> toggle Vector Quantization to significantly compress the texture memory of all loaded slabs.</li>
+          <li><strong>Interpolation Mode:</strong> switch between Nearest, Bilinear (spatial only), and Quadrilinear (spatial + angular cross-slab) blending modes.</li>
           <li><strong>Depth scale / bias:</strong> control how strongly the depth map displaces the mesh.</li>
           <li><strong>Depth tear threshold:</strong> controls how aggressively triangles are removed at depth edges.</li>
+          <li><strong>Background cutoff:</strong> sets the depth threshold beyond which background geometry is ignored.</li>
           <li><strong>Mesh columns / rows:</strong> control proxy mesh resolution.</li>
-          <li><strong>Yaw, pitch, zoom, pan, FOV:</strong> control the virtual camera.</li>
-          <li><strong>Depth brush:</strong> edits depth values interactively; right-drag smooths locally.</li>
+          <li><strong>Yaw, pitch, zoom, pan, FOV:</strong> control the virtual camera (extended ranges unlock full 360&deg; orbiting in multi-slab mode).</li>
+          <li><strong>Depth brush:</strong> edit depth values interactively on the individual slab thumbnails; right-drag smooths locally.</li>
         </ul>
       </div>
     </div>
@@ -303,26 +403,17 @@
       <h2 class="title is-3 has-text-centered">Future Additions</h2>
       <div class="content has-text-justified">
         <p>
-          Since this method starts from a single RGB-D view, it cannot recover surfaces that were hidden in the
-          original image. When the camera moves, newly visible regions appear as holes or stretched texture.
-          Triangle tearing makes these missing regions cleaner, but it does not fill them.
+          With the foundation of multi-slab light fields and quadrilinear blending established, the system now synthesizes continuous novel views from multiple angles. However, there are still several avenues for future enhancement:
         </p>
         <ul>
           <li>
-            <strong>Multi-image input:</strong> support several RGB/depth images captured from different angles.
-            This would provide more real scene information and reduce missing regions when the camera moves.
+            <strong>Improving Input Data Quality:</strong> The rendering quality is heavily bound by the raw input data. Standard depth sensors often produce noisy, misaligned, or incomplete depth maps at object boundaries. Future work could integrate depth-map upsampling, hole-filling algorithms, or temporal smoothing to enhance the RGB-D inputs before they reach the renderer.
           </li>
           <li>
-            <strong>View interpolation:</strong> blend nearby input views based on the requested virtual camera,
-            which would make the result more accurate and realistic than relying on one image.
+            <strong>Advanced Mesh Representations:</strong> Instead of a fixed-resolution regular grid, the proxy mesh could be upgraded to an adaptive structure (like a quadtree) to concentrate triangle density precisely at depth discontinuities. Alternatively, Layered Depth Images (LDI) could be used to separate foreground and background pixels, solving occlusion boundaries more cleanly without triangle tearing.
           </li>
           <li>
-            <strong>Layered depth representation:</strong> separate foreground and background layers to handle
-            object boundaries more cleanly.
-          </li>
-          <li>
-            <strong>Long-term neural extension:</strong> explore NeRF-like or Gaussian-splatting-style scene
-            representations if many calibrated images become available.
+            <strong>Neural Network (NN) Enhancements:</strong> We can explore AI-driven rendering techniques. For example, a lightweight Convolutional Neural Network (CNN) could be applied in screen-space to automatically inpaint and synthesize missing textures in occluded "hole" regions. Looking further, the framework could incorporate Neural Radiance Fields (NeRF) or 3D Gaussian Splatting to achieve true photorealism for complex scenes.
           </li>
         </ul>
       </div>
@@ -344,6 +435,9 @@
         <ul>
           <li>Levoy and Hanrahan, <em>Light Field Rendering</em>, SIGGRAPH 1996.</li>
           <li>Gortler et al., <em>The Lumigraph</em>, SIGGRAPH 1996.</li>
+          <li>Mark, McMillan, and Bishop, <em>Post-Rendering 3D Warping</em>, Symposium on Interactive 3D Graphics 1997. (Basis for proxy mesh depth warping).</li>
+          <li>Beers, Agrawala, and Chaddha, <em>Rendering from Compressed Textures</em>, SIGGRAPH 1996. (Foundation for Vector Quantization in graphics).</li>
+          <li>Buehler et al., <em>Unstructured Lumigraph Rendering</em>, SIGGRAPH 2001. (Concepts for cross-slab view blending).</li>
           <li>Project-page framework adapted from the Academic Project Page Template.</li>
         </ul>
       </div>

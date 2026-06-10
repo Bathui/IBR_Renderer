@@ -27,7 +27,8 @@ void DepthMesh::rebuild(const ImageResource& image,
                         int rows,
                         float depthScale,
                         float depthBias,
-                        float tearThreshold) {
+                        float tearThreshold,
+                        float backgroundCutoff) {
     // Keep the mesh in the same aspect ratio as the source image.
     const float aspect = static_cast<float>(image.width()) / static_cast<float>(image.height());
     cols = std::max(8, cols);
@@ -56,18 +57,29 @@ void DepthMesh::rebuild(const ImageResource& image,
     indices.reserve((cols - 1) * (rows - 1) * 6);
 
     // Skip triangles across sharp depth jumps. This leaves holes instead of long texture streaks.
+    // Also skip triangles where ALL vertices are background (max depth < cutoff).
     for (int y = 0; y < rows - 1; ++y) {
         for (int x = 0; x < cols - 1; ++x) {
             const unsigned int i0 = static_cast<unsigned int>(y * cols + x);
             const unsigned int i1 = i0 + 1;
             const unsigned int i2 = static_cast<unsigned int>((y + 1) * cols + x);
             const unsigned int i3 = i2 + 1;
-            if (triangleIsContinuous(vertexDepths[i0], vertexDepths[i2], vertexDepths[i1], tearThreshold)) {
+
+            const float d0 = vertexDepths[i0];
+            const float d1 = vertexDepths[i1];
+            const float d2 = vertexDepths[i2];
+            const float d3 = vertexDepths[i3];
+
+            // Triangle 1: i0, i2, i1
+            if (std::max({d0, d2, d1}) >= backgroundCutoff &&
+                triangleIsContinuous(d0, d2, d1, tearThreshold)) {
                 indices.push_back(i0);
                 indices.push_back(i2);
                 indices.push_back(i1);
             }
-            if (triangleIsContinuous(vertexDepths[i1], vertexDepths[i2], vertexDepths[i3], tearThreshold)) {
+            // Triangle 2: i1, i2, i3
+            if (std::max({d1, d2, d3}) >= backgroundCutoff &&
+                triangleIsContinuous(d1, d2, d3, tearThreshold)) {
                 indices.push_back(i1);
                 indices.push_back(i2);
                 indices.push_back(i3);

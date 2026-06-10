@@ -3,6 +3,7 @@
 #include <DepthMap.h>
 #include <DepthMesh.h>
 #include <ImageResource.h>
+#include <LightFieldSlab.h>
 #include <WarpRenderer.h>
 
 #include <GLFW/glfw3.h>
@@ -25,6 +26,7 @@
 #endif
 #include <windows.h>
 #include <commdlg.h>
+#include <shobjidl.h>
 
 namespace {
 
@@ -56,6 +58,40 @@ std::string openImageFileDialog(const char* title) {
     return {};
 }
 
+std::string openFolderDialog(const char* title) {
+    std::string result;
+    HRESULT hrInit = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE);
+    IFileOpenDialog *pfd = nullptr;
+    if (SUCCEEDED(CoCreateInstance(CLSID_FileOpenDialog, NULL, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&pfd)))) {
+        DWORD dwOptions;
+        if (SUCCEEDED(pfd->GetOptions(&dwOptions))) {
+            pfd->SetOptions(dwOptions | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM);
+        }
+        if (SUCCEEDED(pfd->Show(NULL))) {
+            IShellItem *psi;
+            if (SUCCEEDED(pfd->GetResult(&psi))) {
+                PWSTR pszPath;
+                if (SUCCEEDED(psi->GetDisplayName(SIGDN_FILESYSPATH, &pszPath))) {
+                    char path[MAX_PATH];
+                    WideCharToMultiByte(CP_UTF8, 0, pszPath, -1, path, MAX_PATH, NULL, NULL);
+                    result = path;
+                    CoTaskMemFree(pszPath);
+                }
+                psi->Release();
+            }
+        }
+        pfd->Release();
+    }
+    if (SUCCEEDED(hrInit)) {
+        CoUninitialize();
+    }
+    // Replace backslashes with forward slashes for consistency
+    std::replace(result.begin(), result.end(), '\\', '/');
+    return result;
+}
+
+const char* interpolationModeNames[] = { "Nearest", "Bilinear", "Quadrilinear" };
+
 // All tweakable UI values live in one place so the renderer, mesh builder,
 // and depth editor can stay focused on their own jobs.
 struct DemoSettings {
@@ -76,6 +112,13 @@ struct DemoSettings {
     float brushRadius = 28.0f;
     float brushDepth = 0.85f;
     float brushStrength = 0.35f;
+
+    // Multi-slab settings
+    std::string bundlePath = "Input_Images/Stanford_Dragon";
+    int interpolationMode = 1; // 0=Nearest, 1=Bilinear, 2=Quadrilinear
+    bool multiSlabActive = false;
+    float backgroundCutoff = 0.12f; // skip background triangles (depth < cutoff)
+    bool useVQ = false; // toggle for VQ compression
 };
 
 class Application {
@@ -93,6 +136,12 @@ public:
     }
 
     void shutdown() {
+        // Clean up multi-slab resources.
+        for (auto& slab : slabs_) {
+            slab.destroy();
+        }
+        slabs_.clear();
+
         mesh_.destroy();
         depth_.destroyTexture();
         image_.destroyTexture();
@@ -100,24 +149,39 @@ public:
     }
 
     void tick() {
-        // All expensive updates are delayed until a setting actually changes.
-        if (depth_.valid() && depth_.dirty()) {
-            depth_.updatePreviewTexture();
-        }
-        if (meshDirty_ && inputsReadyForMesh()) {
-            rebuildMesh();
-        }
-        if (sceneReady()) {
-            renderer_.render(image_, mesh_, settings_.camera);
-            if (exportResultRequested_) {
-                exportCurrentResult();
+        if (settings_.multiSlabActive && !slabs_.empty()) {
+            // Multi-slab path.
+            if (multiSlabMeshDirty_) {
+                rebuildAllSlabMeshes();
+            }
+            if (anySlabReady()) {
+                InterpolationMode mode = static_cast<InterpolationMode>(settings_.interpolationMode);
+                renderer_.renderMultiSlab(slabs_, settings_.camera, mode);
+                if (exportResultRequested_) {
+                    exportCurrentResult();
+                }
+            }
+        } else {
+            // Original single-slab path.
+            if (depth_.valid() && depth_.dirty()) {
+                depth_.updatePreviewTexture();
+            }
+            if (meshDirty_ && inputsReadyForMesh()) {
+                rebuildMesh();
+            }
+            if (sceneReady()) {
+                renderer_.render(image_, mesh_, settings_.camera);
+                if (exportResultRequested_) {
+                    exportCurrentResult();
+                }
             }
         }
     }
 
     void drawMainCanvas(int displayW, int displayH) const {
         // The warp result is drawn on the main window, not inside an ImGui image widget.
-        if (sceneReady()) {
+        bool ready = settings_.multiSlabActive ? anySlabReady() : sceneReady();
+        if (ready) {
             renderer_.target().blitToDefaultFramebuffer(displayW, displayH);
         }
     }
@@ -128,6 +192,7 @@ public:
         ImGui::Begin("Control Panel");
         ImGui::Text("RGB image + editable depth map -> textured proxy mesh -> real-time novel-view warp");
 
+        drawMultiSlabControls();
         drawInputControls();
         drawWarpControls();
         drawBrushControls();
@@ -137,6 +202,166 @@ public:
     }
 
 private:
+    // ========================================================================
+    //  Multi-slab management
+    // ========================================================================
+
+    void loadBundleScene(const std::string& bundleDir) {
+        // Clean up any existing slabs.
+        for (auto& slab : slabs_) {
+            slab.destroy();
+        }
+        slabs_.clear();
+
+        struct SlabDef {
+            std::string rgbFile;
+            std::string depthFile;
+            SlabOrientation orient;
+            std::string label;
+        };
+
+        const SlabDef defs[] = {
+            { bundleDir + "/front.png",  bundleDir + "/front_depth.png",
+              {   0.0f,   0.0f }, "Front" },
+            { bundleDir + "/back.png",   bundleDir + "/back_depth.png",
+              { 180.0f,   0.0f }, "Back" },
+            { bundleDir + "/left.png",   bundleDir + "/left_depth.png",
+              { -90.0f,   0.0f }, "Left" },
+            { bundleDir + "/right.png",  bundleDir + "/right_depth.png",
+              {  90.0f,   0.0f }, "Right" },
+        };
+
+        int loadedCount = 0;
+        for (const auto& def : defs) {
+            LightFieldSlab slab;
+            if (slab.loadFromFiles(def.rgbFile, def.depthFile, def.orient, def.label,
+                                   settings_.invertDepth)) {
+                slabs_.push_back(std::move(slab));
+                ++loadedCount;
+            }
+        }
+
+        if (loadedCount > 0) {
+            settings_.multiSlabActive = true;
+            multiSlabMeshDirty_ = true;
+            // Adjust camera defaults for multi-slab viewing.
+            settings_.camera.yaw = 0.0f;
+            settings_.camera.pitch = 0.0f;
+            settings_.camera.zoom = 2.5f;
+            status_ = "Loaded " + std::to_string(loadedCount) + " slabs from bundle.";
+        } else {
+            status_ = "Failed to load any slabs from " + bundleDir;
+        }
+    }
+
+    void rebuildAllSlabMeshes() {
+        InterpolationMode mode = static_cast<InterpolationMode>(settings_.interpolationMode);
+        for (auto& slab : slabs_) {
+            slab.rebuildMesh(settings_.meshCols, settings_.meshRows,
+                             settings_.depthScale, settings_.depthBias,
+                             settings_.tearThreshold, settings_.backgroundCutoff,
+                             mode);
+        }
+        multiSlabMeshDirty_ = false;
+    }
+
+    bool anySlabReady() const {
+        for (const auto& slab : slabs_) {
+            if (slab.meshReady()) return true;
+        }
+        return false;
+    }
+
+    void drawMultiSlabControls() {
+        if (!ImGui::CollapsingHeader("Multi-Slab Light Field", ImGuiTreeNodeFlags_DefaultOpen)) {
+            return;
+        }
+
+        char bundlePathBuffer[512] = {};
+        std::snprintf(bundlePathBuffer, sizeof(bundlePathBuffer), "%s", settings_.bundlePath.c_str());
+        ImGui::SetNextItemWidth(250.0f);
+        if (ImGui::InputText("Bundle Path", bundlePathBuffer, sizeof(bundlePathBuffer))) {
+            settings_.bundlePath = bundlePathBuffer;
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Load Bundle")) {
+            loadBundleScene(settings_.bundlePath);
+        }
+        ImGui::SameLine();
+        if (ImGui::Button("Browse Bundle")) {
+            const std::string selectedPath = openFolderDialog("Select Bundle Folder");
+            if (!selectedPath.empty()) {
+                settings_.bundlePath = selectedPath;
+                loadBundleScene(settings_.bundlePath);
+            }
+        }
+
+        if (ImGui::Checkbox("Use VQ Compression", &settings_.useVQ)) {
+            if (settings_.useVQ) {
+                status_ = "Compressing textures... please wait.";
+                for (auto& slab : slabs_) {
+                    if (slab.image().compressVQ()) {
+                        slab.image().uploadTextureVQ();
+                    }
+                }
+                status_ = "VQ Compression enabled.";
+            } else {
+                for (auto& slab : slabs_) {
+                    slab.image().disableVQ();
+                }
+                status_ = "VQ Compression disabled.";
+            }
+        }
+
+        if (!slabs_.empty()) {
+            ImGui::SameLine();
+            if (ImGui::Button("Unload Multi-Slab")) {
+                for (auto& slab : slabs_) slab.destroy();
+                slabs_.clear();
+                settings_.multiSlabActive = false;
+                status_ = "Unloaded all slabs.";
+            }
+        }
+        
+        // Interpolation mode selector.
+        ImGui::Combo("Interpolation", &settings_.interpolationMode, interpolationModeNames, 3);
+
+        if (settings_.multiSlabActive && !slabs_.empty()) {
+            ImGui::Text("Active slabs: %d", static_cast<int>(slabs_.size()));
+
+            // Show which slab(s) are currently selected.
+            SlabSelection sel = selectClosestSlabs(slabs_, settings_.camera.yaw, settings_.camera.pitch);
+            if (sel.primaryIdx >= 0) {
+                ImGui::Text("Primary:   [%s] (%.1f deg)",
+                            slabs_[sel.primaryIdx].label().c_str(),
+                            slabs_[sel.primaryIdx].angularDistance(settings_.camera.yaw, settings_.camera.pitch));
+                if (sel.secondaryIdx >= 0) {
+                    ImGui::Text("Secondary: [%s] (%.1f deg)  blend=%.2f",
+                                slabs_[sel.secondaryIdx].label().c_str(),
+                                slabs_[sel.secondaryIdx].angularDistance(settings_.camera.yaw, settings_.camera.pitch),
+                                sel.blendWeight);
+                }
+            }
+
+            // Individual slab info.
+            if (ImGui::TreeNode("Slab Details")) {
+                for (int i = 0; i < static_cast<int>(slabs_.size()); ++i) {
+                    const auto& s = slabs_[i];
+                    ImGui::BulletText("[%s] yaw=%.0f pitch=%.0f  %dx%d  tris=%d",
+                                     s.label().c_str(),
+                                     s.orientation().yaw, s.orientation().pitch,
+                                     s.image().width(), s.image().height(),
+                                     s.mesh().indexCount() / 3);
+                }
+                ImGui::TreePop();
+            }
+        }
+    }
+
+    // ========================================================================
+    //  Original single-slab controls (kept for backward compatibility)
+    // ========================================================================
+
     // Fallback depth is only for quick testing. A real depth image usually gives better results.
     void regenerateDepth() {
         if (!image_.valid()) {
@@ -200,13 +425,16 @@ private:
     }
 
     void markMeshDirtyIfInputsReady() {
-        if (inputsReadyForMesh()) {
+        if (settings_.multiSlabActive) {
+            multiSlabMeshDirty_ = true;
+        } else if (inputsReadyForMesh()) {
             meshDirty_ = true;
         }
     }
 
     void requestResultExport() {
-        if (!sceneReady()) {
+        bool ready = settings_.multiSlabActive ? anySlabReady() : sceneReady();
+        if (!ready) {
             status_ = "Load matching RGB/depth images before exporting.";
             return;
         }
@@ -228,6 +456,11 @@ private:
     }
 
     void drawInputControls() {
+        if (settings_.multiSlabActive) {
+            // In multi-slab mode, the single-image input section is hidden.
+            return;
+        }
+
         if (!ImGui::CollapsingHeader("Input and Depth", ImGuiTreeNodeFlags_DefaultOpen)) {
             return;
         }
@@ -307,6 +540,7 @@ private:
         if (ImGui::SliderFloat("Depth scale", &settings_.depthScale, -1.25f, 1.25f)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderFloat("Depth bias", &settings_.depthBias, -1.0f, 1.0f)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderFloat("Depth tear threshold", &settings_.tearThreshold, 0.0f, 1.0f)) markMeshDirtyIfInputsReady();
+        if (ImGui::SliderFloat("Background cutoff", &settings_.backgroundCutoff, 0.0f, 1.0f, "%.3f")) markMeshDirtyIfInputsReady();
         if (ImGui::SliderInt("Mesh columns", &settings_.meshCols, 16, 320)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderInt("Mesh rows", &settings_.meshRows, 16, 240)) markMeshDirtyIfInputsReady();
         // Camera/background controls affect rendering only, so they do not need a mesh rebuild.
@@ -317,11 +551,23 @@ private:
             requestResultExport();
         }
         ImGui::Separator();
-        ImGui::SliderFloat("Yaw", &settings_.camera.yaw, -45.0f, 45.0f);
-        ImGui::SliderFloat("Pitch", &settings_.camera.pitch, -35.0f, 35.0f);
+
+        // In multi-slab mode, extend the slider ranges for full orbiting.
+        if (settings_.multiSlabActive) {
+            ImGui::SliderFloat("Yaw",   &settings_.camera.yaw,   -180.0f, 180.0f);
+            ImGui::SliderFloat("Pitch", &settings_.camera.pitch,  -90.0f,  90.0f);
+        } else {
+            ImGui::SliderFloat("Yaw",   &settings_.camera.yaw,    -45.0f,  45.0f);
+            ImGui::SliderFloat("Pitch", &settings_.camera.pitch,   -35.0f,  35.0f);
+        }
         ImGui::SliderFloat("Zoom", &settings_.camera.zoom, 1.0f, 5.0f);
         ImGui::SliderFloat2("Pan", glm::value_ptr(settings_.camera.pan), -0.8f, 0.8f);
         ImGui::SliderFloat("Perspective/FOV", &settings_.camera.fov, 18.0f, 75.0f);
+
+        // Status line at the bottom of warp controls.
+        if (!status_.empty()) {
+            ImGui::TextWrapped("%s", status_.c_str());
+        }
     }
 
     void drawBrushControls() {
@@ -341,43 +587,83 @@ private:
         const float itemH = 230.0f;
 
         ImGui::Separator();
-        ImGui::Text("Input Images");
-        ImGui::Columns(2, "debug_views", false);
 
-        // The debug previews are deliberately kept in the UI; the actual warp appears on the main canvas.
-        ImGui::Text("Original image");
-        if (image_.valid()) {
-            const ImVec2 imagePreviewSize = fitSize(static_cast<float>(image_.width()), static_cast<float>(image_.height()), itemW, itemH);
-            ImGui::Image(static_cast<ImTextureID>(image_.texture()), imagePreviewSize);
-        } else {
-            ImGui::TextWrapped("No RGB image loaded.");
-        }
-        ImGui::NextColumn();
+        if (settings_.multiSlabActive && !slabs_.empty()) {
+            // Multi-slab mode: show thumbnails of all loaded slabs.
+            ImGui::Text("Slab Thumbnails");
+            for (int i = 0; i < static_cast<int>(slabs_.size()); ++i) {
+                auto& slab = slabs_[i];
+                if (!slab.valid()) continue;
 
-        ImGui::Text("Editable depth map");
-        if (depth_.valid()) {
-            const ImVec2 depthPreviewSize = fitSize(static_cast<float>(depth_.width()), static_cast<float>(depth_.height()), itemW, itemH);
-            ImVec2 depthPos = ImGui::GetCursorScreenPos();
+                ImGui::BeginGroup();
+                ImGui::Text("%s", slab.label().c_str());
+                const ImVec2 thumbSize = fitSize(
+                    static_cast<float>(slab.image().width()),
+                    static_cast<float>(slab.image().height()),
+                    itemW * 0.45f, itemH * 0.65f);
+                ImGui::Image(static_cast<ImTextureID>(slab.image().texture()), thumbSize);
 
-            // InvisibleButton makes the preview an active drag target, so painting does not move the ImGui window.
-            ImGui::InvisibleButton("depth_paint_canvas",
-                                   depthPreviewSize,
-                                   ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
-            ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(depth_.texture()),
-                                                 depthPos,
-                                                 ImVec2(depthPos.x + depthPreviewSize.x, depthPos.y + depthPreviewSize.y));
+                ImVec2 depthPos = ImGui::GetCursorScreenPos();
+                ImGui::InvisibleButton(("depth_paint_canvas_" + std::to_string(i)).c_str(),
+                                       thumbSize,
+                                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+                ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(slab.depth().texture()),
+                                                     depthPos,
+                                                     ImVec2(depthPos.x + thumbSize.x, depthPos.y + thumbSize.y));
 
-            const bool paintingActive = ImGui::IsItemHovered() || ImGui::IsItemActive();
-            if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
-                paintDepthFromUi(depthPos, depthPreviewSize, false);
+                const bool paintingActive = ImGui::IsItemHovered() || ImGui::IsItemActive();
+                if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    paintSlabDepthFromUi(i, depthPos, thumbSize, false);
+                }
+                if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+                    paintSlabDepthFromUi(i, depthPos, thumbSize, true);
+                }
+                ImGui::EndGroup();
+
+                if (i < static_cast<int>(slabs_.size()) - 1) {
+                    ImGui::SameLine();
+                }
             }
-            if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
-                paintDepthFromUi(depthPos, depthPreviewSize, true);
-            }
         } else {
-            ImGui::TextWrapped("No depth image loaded.");
+            // Original single-slab debug views.
+            ImGui::Text("Input Images");
+            ImGui::Columns(2, "debug_views", false);
+
+            // The debug previews are deliberately kept in the UI; the actual warp appears on the main canvas.
+            ImGui::Text("Original image");
+            if (image_.valid()) {
+                const ImVec2 imagePreviewSize = fitSize(static_cast<float>(image_.width()), static_cast<float>(image_.height()), itemW, itemH);
+                ImGui::Image(static_cast<ImTextureID>(image_.texture()), imagePreviewSize);
+            } else {
+                ImGui::TextWrapped("No RGB image loaded.");
+            }
+            ImGui::NextColumn();
+
+            ImGui::Text("Editable depth map");
+            if (depth_.valid()) {
+                const ImVec2 depthPreviewSize = fitSize(static_cast<float>(depth_.width()), static_cast<float>(depth_.height()), itemW, itemH);
+                ImVec2 depthPos = ImGui::GetCursorScreenPos();
+
+                // InvisibleButton makes the preview an active drag target, so painting does not move the ImGui window.
+                ImGui::InvisibleButton("depth_paint_canvas",
+                                       depthPreviewSize,
+                                       ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
+                ImGui::GetWindowDrawList()->AddImage(static_cast<ImTextureID>(depth_.texture()),
+                                                     depthPos,
+                                                     ImVec2(depthPos.x + depthPreviewSize.x, depthPos.y + depthPreviewSize.y));
+
+                const bool paintingActive = ImGui::IsItemHovered() || ImGui::IsItemActive();
+                if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Left)) {
+                    paintDepthFromUi(depthPos, depthPreviewSize, false);
+                }
+                if (paintingActive && ImGui::IsMouseDown(ImGuiMouseButton_Right)) {
+                    paintDepthFromUi(depthPos, depthPreviewSize, true);
+                }
+            } else {
+                ImGui::TextWrapped("No depth image loaded.");
+            }
+            ImGui::Columns(1);
         }
-        ImGui::Columns(1);
     }
 
     void paintDepthFromUi(ImVec2 imageMin, ImVec2 imageSize, bool smoothMode) {
@@ -395,6 +681,21 @@ private:
         markMeshDirtyIfInputsReady();
     }
 
+    void paintSlabDepthFromUi(int slabIdx, ImVec2 imageMin, ImVec2 imageSize, bool smoothMode) {
+        ImGuiIO& io = ImGui::GetIO();
+        const float localX = io.MousePos.x - imageMin.x;
+        const float localY = io.MousePos.y - imageMin.y;
+        if (localX < 0.0f || localY < 0.0f || localX >= imageSize.x || localY >= imageSize.y) {
+            return;
+        }
+
+        auto& depth = slabs_[slabIdx].depth();
+        const float imgX = (localX / imageSize.x) * static_cast<float>(depth.width());
+        const float imgY = (localY / imageSize.y) * static_cast<float>(depth.height());
+        depth.paintAt(imgX, imgY, settings_.brushRadius, settings_.brushDepth, settings_.brushStrength, smoothMode);
+        multiSlabMeshDirty_ = true;
+    }
+
     DemoSettings settings_;
     ImageResource image_;
     DepthMap depth_;
@@ -403,6 +704,10 @@ private:
     std::string status_;
     bool meshDirty_ = true;
     bool exportResultRequested_ = false;
+
+    // Multi-slab state.
+    std::vector<LightFieldSlab> slabs_;
+    bool multiSlabMeshDirty_ = true;
 };
 
 }  // namespace

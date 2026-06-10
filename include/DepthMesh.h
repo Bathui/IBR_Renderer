@@ -15,7 +15,8 @@ public:
                  int rows,
                  float depthScale,
                  float depthBias,
-                 float tearThreshold);
+                 float tearThreshold,
+                 float backgroundCutoff = 0.0f);
     void destroy();
 
     GLuint vao() const { return vao_; }

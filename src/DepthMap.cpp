@@ -170,6 +170,18 @@ float DepthMap::sample(float u, float v) const {
     return glm::mix(glm::mix(a, b, tx), glm::mix(c, d, tx), ty);
 }
 
+float DepthMap::sampleNearest(float u, float v) const {
+    if (!valid()) {
+        return 0.0f;
+    }
+    // Snap to the nearest integer texel — no blending at all.
+    const int x = std::clamp(static_cast<int>(std::round(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(width_ - 1))),
+                             0, width_ - 1);
+    const int y = std::clamp(static_cast<int>(std::round(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(height_ - 1))),
+                             0, height_ - 1);
+    return values_[y * width_ + x];
+}
+
 void DepthMap::buildPreviewCpu() {
     if (!valid()) {
         previewRgba_.clear();

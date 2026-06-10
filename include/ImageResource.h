@@ -12,6 +12,14 @@ public:
     bool loadWithTexture(const std::string& path);
     void destroyTexture();
 
+    bool compressVQ();
+    void uploadTextureVQ();
+    void disableVQ();
+
+    bool isVQ() const { return isVQ_; }
+    GLuint indexTexture() const { return indexTexture_; }
+    GLuint codebookTexture() const { return codebookTexture_; }
+
     int width() const { return width_; }
     int height() const { return height_; }
     GLuint texture() const { return texture_; }
@@ -30,4 +38,10 @@ private:
     int channels_ = 0;
     std::vector<unsigned char> rgba_;
     GLuint texture_ = 0;
+
+    bool isVQ_ = false;
+    GLuint indexTexture_ = 0;
+    GLuint codebookTexture_ = 0;
+    std::vector<unsigned char> indices_;
+    std::vector<unsigned char> codebook_;
 };

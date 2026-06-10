@@ -23,6 +23,8 @@ public:
 
     // Bilinear lookup so the mesh resolution can differ from the depth image resolution.
     float sample(float u, float v) const;
+    // Nearest-neighbor lookup: snaps to the closest texel with no blending.
+    float sampleNearest(float u, float v) const;
     int width() const { return width_; }
     int height() const { return height_; }
     GLuint texture() const { return previewTexture_; }

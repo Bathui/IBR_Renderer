@@ -13,6 +13,7 @@ add_executable(IBR_Viewer
     src/DepthMesh.cpp
     src/ImageResource.cpp
     src/ImageWrite.cpp
+    src/LightFieldSlab.cpp
     src/WarpRenderer.cpp
     src/glad.c
     src/imgui.cpp
