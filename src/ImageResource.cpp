@@ -11,7 +11,6 @@ bool ImageResource::loadCpuOnly(const std::string& path) {
 }
 
 bool ImageResource::loadWithTexture(const std::string& path) {
-    // RGB images need both CPU pixels and a GPU texture for rendering.
     if (!loadPixels(path)) {
         return false;
     }
@@ -20,7 +19,6 @@ bool ImageResource::loadWithTexture(const std::string& path) {
 }
 
 bool ImageResource::loadPixels(const std::string& path) {
-    // stb_image normalizes all formats to 4 channels so the rest of the code can assume RGBA.
     int width = 0;
     int height = 0;
     int channels = 0;
@@ -39,12 +37,10 @@ bool ImageResource::loadPixels(const std::string& path) {
 }
 
 void ImageResource::uploadTexture() {
-    // Replace the old texture if the user loads a different image.
     if (texture_) {
         glDeleteTextures(1, &texture_);
     }
 
-    // Clamp-to-edge avoids sampling wrapped pixels along the border of the image mesh.
     glGenTextures(1, &texture_);
     glBindTexture(GL_TEXTURE_2D, texture_);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
@@ -108,7 +104,6 @@ bool ImageResource::compressVQ() {
     std::vector<int> counts(K);
 
     for (int iter = 0; iter < 5; ++iter) {
-        // Assign blocks to nearest codebook entry
         for (int b = 0; b < numBlocks; ++b) {
             float bestDist = 1e9f;
             int bestK = 0;
@@ -126,7 +121,6 @@ bool ImageResource::compressVQ() {
             indices_[b] = static_cast<unsigned char>(bestK);
         }
 
-        // Update codebook
         std::vector<std::vector<float>> newCodebook(K, std::vector<float>(16, 0.0f));
         std::fill(counts.begin(), counts.end(), 0);
 
@@ -191,12 +185,10 @@ void ImageResource::disableVQ() {
         glDeleteTextures(1, &codebookTexture_);
         codebookTexture_ = 0;
     }
-    // Restore regular texture
     uploadTexture();
 }
 
 float ImageResource::luminanceAt(int x, int y) const {
-    // Standard perceptual RGB weights make depth images work whether they are RGB or grayscale.
     x = std::clamp(x, 0, width_ - 1);
     y = std::clamp(y, 0, height_ - 1);
     const int idx = (y * width_ + x) * 4;

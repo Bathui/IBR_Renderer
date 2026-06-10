@@ -9,104 +9,23 @@
 #include <glm/gtc/type_ptr.hpp>
 
 #include <algorithm>
+#include <fstream>
 #include <iostream>
+#include <sstream>
 #include <vector>
 
 namespace {
 
-// Minimal shader pair: transform the proxy mesh and texture it with the RGB image.
-const char* kVertexSource = R"GLSL(
-    #version 330 core
-    layout (location = 0) in vec3 aPos;
-    layout (location = 1) in vec2 aUv;
-    uniform mat4 uMVP;
-    out vec2 vUv;
-    void main() {
-        vUv = aUv;
-        gl_Position = uMVP * vec4(aPos, 1.0);
+std::string readFile(const std::string& path) {
+    std::ifstream file(path);
+    if (!file.is_open()) {
+        std::cerr << "Failed to open file: " << path << "\n";
+        return "";
     }
-)GLSL";
-
-const char* kFragmentSource = R"GLSL(
-    #version 330 core
-    in vec2 vUv;
-    uniform sampler2D uImage;
-    out vec4 fragColor;
-    void main() {
-        // Output alpha=1 to mark this pixel as foreground geometry.
-        fragColor = vec4(texture(uImage, vUv).rgb, 1.0);
-    }
-)GLSL";
-
-const char* kVQFragmentSource = R"GLSL(
-    #version 330 core
-    in vec2 vUv;
-    uniform usampler2D uIndexMap;
-    uniform sampler1D uCodebook;
-    out vec4 fragColor;
-    void main() {
-        ivec2 indexSize = textureSize(uIndexMap, 0);
-        vec2 p = vUv * vec2(indexSize) * 2.0;
-        
-        ivec2 p_int = ivec2(clamp(p, vec2(0.0), vec2(indexSize * 2) - 1.0));
-        ivec2 b = p_int / 2;
-        ivec2 offset = p_int % 2;
-        
-        uint k = texelFetch(uIndexMap, b, 0).r;
-        int codebookIdx = int(k * 4u) + offset.y * 2 + offset.x;
-        
-        fragColor = vec4(texelFetch(uCodebook, codebookIdx, 0).rgb, 1.0);
-    }
-)GLSL";
-
-// Fullscreen-quad shader for blending two render targets together.
-const char* kBlendVertexSource = R"GLSL(
-    #version 330 core
-    layout (location = 0) in vec2 aPos;
-    layout (location = 1) in vec2 aUv;
-    out vec2 vUv;
-    void main() {
-        vUv = aUv;
-        gl_Position = vec4(aPos, 0.0, 1.0);
-    }
-)GLSL";
-
-const char* kBlendFragmentSource = R"GLSL(
-    #version 330 core
-    in vec2 vUv;
-    uniform sampler2D uSlabA;
-    uniform sampler2D uSlabB;
-    uniform sampler2D uDepthA;
-    uniform sampler2D uDepthB;
-    uniform float uBlendWeight;
-    out vec4 fragColor;
-    void main() {
-        vec4 a = texture(uSlabA, vUv);
-        vec4 b = texture(uSlabB, vUv);
-        float dA = texture(uDepthA, vUv).r;
-        float dB = texture(uDepthB, vUv).r;
-        
-        // Use the alpha channel to only blend valid foreground pixels.
-        // This prevents the background color from bleeding into the object.
-        if (a.a > 0.0 && b.a > 0.0) {
-            float depthDiff = dB - dA;
-            float bias = 0.01; // Depth tolerance
-            if (depthDiff > bias) {
-                fragColor = a; // A is much closer, occludes B
-            } else if (depthDiff < -bias) {
-                fragColor = b; // B is much closer, occludes A
-            } else {
-                fragColor = vec4(mix(a.rgb, b.rgb, uBlendWeight), 1.0);
-            }
-        } else if (a.a > 0.0) {
-            fragColor = a;
-        } else if (b.a > 0.0) {
-            fragColor = b;
-        } else {
-            fragColor = vec4(a.rgb, 0.0); // Both background
-        }
-    }
-)GLSL";
+    std::stringstream buffer;
+    buffer << file.rdbuf();
+    return buffer.str();
+}
 
 GLuint compileShader(GLenum type, const char* source) {
     GLuint shader = glCreateShader(type);
@@ -126,7 +45,6 @@ GLuint compileShader(GLenum type, const char* source) {
 }  // namespace
 
 bool ShaderProgram::create(const char* vertexSource, const char* fragmentSource) {
-    // Compile both shader stages and link them into a reusable program.
     GLuint vs = compileShader(GL_VERTEX_SHADER, vertexSource);
     GLuint fs = compileShader(GL_FRAGMENT_SHADER, fragmentSource);
     id_ = glCreateProgram();
@@ -155,7 +73,6 @@ void ShaderProgram::destroy() {
 }
 
 void RenderTarget::ensure(int width, int height) {
-    // Recreate framebuffer storage only when the requested size changes.
     width = std::max(16, width);
     height = std::max(16, height);
     if (fbo_ && width_ == width && height_ == height) {
@@ -184,7 +101,6 @@ void RenderTarget::ensure(int width, int height) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glTexImage2D(GL_TEXTURE_2D, 0, GL_DEPTH24_STENCIL8, width_, height_, 0, GL_DEPTH_STENCIL, GL_UNSIGNED_INT_24_8, nullptr);
 
-    // The color texture is what gets shown on screen and exported in screenshots.
     glBindFramebuffer(GL_FRAMEBUFFER, fbo_);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, color_, 0);
     glFramebufferTexture2D(GL_FRAMEBUFFER, GL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depthTexture_, 0);
@@ -203,7 +119,6 @@ bool RenderTarget::savePng(const std::string& outputPath) const {
     glReadPixels(0, 0, width_, height_, GL_RGBA, GL_UNSIGNED_BYTE, pixels.data());
     glBindFramebuffer(GL_FRAMEBUFFER, 0);
 
-    // OpenGL reads pixels from bottom to top; PNG files expect top to bottom.
     const int rowBytes = width_ * 4;
     for (int y = 0; y < height_; ++y) {
         const int srcY = height_ - 1 - y;
@@ -230,7 +145,6 @@ void RenderTarget::blitToDefaultFramebuffer(int framebufferWidth, int framebuffe
     const int x1 = x0 + drawW;
     const int y1 = y0 + drawH;
 
-    // Preserve aspect ratio when copying the offscreen result to the window.
     glBindFramebuffer(GL_READ_FRAMEBUFFER, fbo_);
     glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
     glBlitFramebuffer(0, 0, width_, height_, x0, y0, x1, y1, GL_COLOR_BUFFER_BIT, GL_LINEAR);
@@ -249,20 +163,28 @@ void RenderTarget::destroy() {
 bool WarpRenderer::init() {
     target_.ensure(900, 620);
 
-    if (!shader_.create(kVertexSource, kFragmentSource)) {
-        return false;
-    }
-    if (!blendShader_.create(kBlendVertexSource, kBlendFragmentSource)) {
-        return false;
-    }
-    if (!vqShader_.create(kVertexSource, kVQFragmentSource)) {
+    std::string vs = readFile("Shaders/main.vert");
+    std::string fs = readFile("Shaders/main.frag");
+    std::string vqFs = readFile("Shaders/vq.frag");
+    std::string blendVs = readFile("Shaders/blend.vert");
+    std::string blendFs = readFile("Shaders/blend.frag");
+
+    if (vs.empty() || fs.empty() || vqFs.empty() || blendVs.empty() || blendFs.empty()) {
+        std::cerr << "Failed to load one or more shaders.\n";
         return false;
     }
 
-    // Create a fullscreen quad for the blend pass.
-    // Two triangles covering NDC [-1,1] x [-1,1].
+    if (!shader_.create(vs.c_str(), fs.c_str())) {
+        return false;
+    }
+    if (!blendShader_.create(blendVs.c_str(), blendFs.c_str())) {
+        return false;
+    }
+    if (!vqShader_.create(vs.c_str(), vqFs.c_str())) {
+        return false;
+    }
+
     float quadVerts[] = {
-        // pos.x  pos.y  uv.x  uv.y
         -1.0f, -1.0f,  0.0f, 0.0f,
          1.0f, -1.0f,  1.0f, 0.0f,
          1.0f,  1.0f,  1.0f, 1.0f,
@@ -287,15 +209,12 @@ bool WarpRenderer::init() {
 }
 
 void WarpRenderer::render(const ImageResource& image, const DepthMesh& mesh, const CameraSettings& camera) {
-    // Render the warped mesh offscreen first. The main window copies this result afterward.
     glBindFramebuffer(GL_FRAMEBUFFER, target_.fbo());
     glViewport(0, 0, target_.width(), target_.height());
     glEnable(GL_DEPTH_TEST);
-    // Ensure final background is opaque if nothing is rendered
     glClearColor(camera.bgColor.r, camera.bgColor.g, camera.bgColor.b, 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
-    // Build camera matrices from UI sliders.
     const float aspect = static_cast<float>(target_.width()) / static_cast<float>(target_.height());
     const glm::mat4 projection = glm::perspective(glm::radians(camera.fov), aspect, 0.05f, 20.0f);
     const glm::mat4 view = glm::lookAt(glm::vec3(camera.pan.x, camera.pan.y, camera.zoom),
@@ -340,7 +259,6 @@ void WarpRenderer::renderSlabToTarget(const ImageResource& image, const DepthMes
     glBindFramebuffer(GL_FRAMEBUFFER, dst.fbo());
     glViewport(0, 0, dst.width(), dst.height());
     glEnable(GL_DEPTH_TEST);
-    // Clear with alpha 0 to distinguish background from foreground geometry.
     glClearColor(camera.bgColor.r, camera.bgColor.g, camera.bgColor.b, 0.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
@@ -350,9 +268,6 @@ void WarpRenderer::renderSlabToTarget(const ImageResource& image, const DepthMes
                                        glm::vec3(camera.pan.x, camera.pan.y, 0.0f),
                                        glm::vec3(0.0f, 1.0f, 0.0f));
 
-    // The mesh should only warp by the DELTA between the current camera angle and
-    // the slab's original capture direction.  Each slab was captured head-on from
-    // its orientation, so a small delta produces the correct depth-based parallax.
     const float deltaYaw   = camera.yaw   - orient.yaw;
     const float deltaPitch = camera.pitch  - orient.pitch;
     glm::mat4 model(1.0f);
@@ -444,7 +359,6 @@ void WarpRenderer::renderMultiSlab(const std::vector<LightFieldSlab>& slabs,
 
     if (mode == InterpolationMode::Quadrilinear && sel.secondaryIdx >= 0 &&
         slabs[sel.secondaryIdx].meshReady() && sel.blendWeight > 0.001f) {
-        // Quadrilinear: render both closest slabs, then blend.
         RenderTarget tempA;
         tempA.ensure(target_.width(), target_.height());
 
@@ -459,7 +373,6 @@ void WarpRenderer::renderMultiSlab(const std::vector<LightFieldSlab>& slabs,
         blendTargets(tempA, targetB_, sel.blendWeight, target_);
         tempA.destroy();
     } else {
-        // Nearest or fallback: render only the closest slab.
         renderSlabToTarget(primary.image(), primary.mesh(), camera,
                            primary.orientation(), target_, filterMode);
     }

@@ -1,5 +1,3 @@
-/// @ref simd
-/// @file glm/simd/common.h
 
 #pragma once
 
@@ -215,7 +213,6 @@ GLM_FUNC_QUALIFIER glm_vec4 glm_vec4_smoothstep(glm_vec4 edge0, glm_vec4 edge1, 
 	return mul2;
 }
 
-// Agner Fog method
 GLM_FUNC_QUALIFIER glm_vec4 glm_vec4_nan(glm_vec4 x)
 {
 	glm_ivec4 const t1 = _mm_castps_si128(x);						// reinterpret as 32-bit integer
@@ -229,7 +226,6 @@ GLM_FUNC_QUALIFIER glm_vec4 glm_vec4_nan(glm_vec4 x)
 	return _mm_castsi128_ps(And);									// exponent = all 1s and fraction != 0
 }
 
-// Agner Fog method
 GLM_FUNC_QUALIFIER glm_vec4 glm_vec4_inf(glm_vec4 x)
 {
 	glm_ivec4 const t1 = _mm_castps_si128(x);										// reinterpret as 32-bit integer

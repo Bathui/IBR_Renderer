@@ -57,8 +57,6 @@ void LightFieldSlab::destroy() {
 }
 
 float LightFieldSlab::angularDistance(float cameraYaw, float cameraPitch) const {
-    // Convert both orientations to unit vectors on the sphere and compute the
-    // great-circle angular distance between them.
     auto toDir = [](float yawDeg, float pitchDeg) {
         const float yr = static_cast<float>(yawDeg   * M_PI / 180.0);
         const float pr = static_cast<float>(pitchDeg * M_PI / 180.0);
@@ -75,7 +73,6 @@ float LightFieldSlab::angularDistance(float cameraYaw, float cameraPitch) const 
 }
 
 // ---------------------------------------------------------------------------
-// Slab selection helper
 // ---------------------------------------------------------------------------
 
 SlabSelection selectClosestSlabs(const std::vector<LightFieldSlab>& slabs,
@@ -85,7 +82,6 @@ SlabSelection selectClosestSlabs(const std::vector<LightFieldSlab>& slabs,
         return sel;
     }
 
-    // Compute angular distances and find the two closest slabs.
     struct Candidate {
         int   index;
         float distance;
@@ -109,7 +105,6 @@ SlabSelection selectClosestSlabs(const std::vector<LightFieldSlab>& slabs,
         sel.secondaryIdx = candidates[1].index;
         const float totalDist = candidates[0].distance + candidates[1].distance;
         if (totalDist > 0.001f) {
-            // Weight: 0 = all primary, 1 = all secondary.
             sel.blendWeight = candidates[0].distance / totalDist;
         }
     }

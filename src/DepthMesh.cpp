@@ -9,7 +9,6 @@
 namespace {
 
 bool triangleIsContinuous(float a, float b, float c, float threshold) {
-    // A high threshold effectively disables tearing.
     if (threshold >= 1.0f) {
         return true;
     }
@@ -29,7 +28,6 @@ void DepthMesh::rebuild(const ImageResource& image,
                         float depthBias,
                         float tearThreshold,
                         float backgroundCutoff) {
-    // Keep the mesh in the same aspect ratio as the source image.
     const float aspect = static_cast<float>(image.width()) / static_cast<float>(image.height());
     cols = std::max(8, cols);
     rows = std::max(8, rows);
@@ -39,7 +37,6 @@ void DepthMesh::rebuild(const ImageResource& image,
     vertices.reserve(cols * rows);
     vertexDepths.reserve(cols * rows);
 
-    // Make a regular image-plane grid and push each vertex along z using depth.
     for (int y = 0; y < rows; ++y) {
         const float v = static_cast<float>(y) / static_cast<float>(rows - 1);
         for (int x = 0; x < cols; ++x) {
@@ -56,8 +53,6 @@ void DepthMesh::rebuild(const ImageResource& image,
     std::vector<unsigned int> indices;
     indices.reserve((cols - 1) * (rows - 1) * 6);
 
-    // Skip triangles across sharp depth jumps. This leaves holes instead of long texture streaks.
-    // Also skip triangles where ALL vertices are background (max depth < cutoff).
     for (int y = 0; y < rows - 1; ++y) {
         for (int x = 0; x < cols - 1; ++x) {
             const unsigned int i0 = static_cast<unsigned int>(y * cols + x);
@@ -70,14 +65,12 @@ void DepthMesh::rebuild(const ImageResource& image,
             const float d2 = vertexDepths[i2];
             const float d3 = vertexDepths[i3];
 
-            // Triangle 1: i0, i2, i1
             if (std::max({d0, d2, d1}) >= backgroundCutoff &&
                 triangleIsContinuous(d0, d2, d1, tearThreshold)) {
                 indices.push_back(i0);
                 indices.push_back(i2);
                 indices.push_back(i1);
             }
-            // Triangle 2: i1, i2, i3
             if (std::max({d1, d2, d3}) >= backgroundCutoff &&
                 triangleIsContinuous(d1, d2, d3, tearThreshold)) {
                 indices.push_back(i1);
@@ -87,7 +80,6 @@ void DepthMesh::rebuild(const ImageResource& image,
         }
     }
 
-    // Allocate the OpenGL buffers on the first rebuild; later rebuilds reuse them.
     if (!vao_) {
         glGenVertexArrays(1, &vao_);
         glGenBuffers(1, &vbo_);
@@ -100,7 +92,6 @@ void DepthMesh::rebuild(const ImageResource& image,
     glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, ebo_);
     glBufferData(GL_ELEMENT_ARRAY_BUFFER, static_cast<GLsizeiptr>(indices.size() * sizeof(unsigned int)), indices.data(), GL_STATIC_DRAW);
 
-    // Attribute 0 is position; attribute 1 is the UV used to sample the RGB texture.
     glEnableVertexAttribArray(0);
     glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(Vertex), reinterpret_cast<void*>(offsetof(Vertex, position)));
     glEnableVertexAttribArray(1);

@@ -1,26 +1,9 @@
 //-----------------------------------------------------------------------------
-// About imgui_impl_opengl3_loader.h:
 //
-// We embed our own OpenGL loader to not require user to provide their own or to have to use ours,
-// which proved to be endless problems for users.
-// Our loader is custom-generated, based on gl3w but automatically filtered to only include
-// enums/functions that we use in our imgui_impl_opengl3.cpp source file in order to be small.
 //
-// YOU SHOULD NOT NEED TO INCLUDE/USE THIS DIRECTLY. THIS IS USED BY imgui_impl_opengl3.cpp ONLY.
-// THE REST OF YOUR APP SHOULD USE A DIFFERENT GL LOADER: ANY GL LOADER OF YOUR CHOICE.
 //
-// IF YOU GET BUILD ERRORS IN THIS FILE (commonly macro redefinitions or function redefinitions):
-// IT LIKELY MEANS THAT YOU ARE BUILDING 'imgui_impl_opengl3.cpp' OR INCLUDING 'imgui_impl_opengl3_loader.h'
-// IN THE SAME COMPILATION UNIT AS ONE OF YOUR FILE WHICH IS USING A THIRD-PARTY OPENGL LOADER.
-// (e.g. COULD HAPPEN IF YOU ARE DOING A UNITY/JUMBO BUILD, OR INCLUDING .CPP FILES FROM OTHERS)
-// YOU SHOULD NOT BUILD BOTH IN THE SAME COMPILATION UNIT.
-// BUT IF YOU REALLY WANT TO, you can '#define IMGUI_IMPL_OPENGL_LOADER_CUSTOM' and imgui_impl_opengl3.cpp
-// WILL NOT BE USING OUR LOADER, AND INSTEAD EXPECT ANOTHER/YOUR LOADER TO BE AVAILABLE IN THE COMPILATION UNIT.
 //
-// Regenerate with:
-//   python3 gl3w_gen.py --output ../imgui/backends/imgui_impl_opengl3_loader.h --ref ../imgui/backends/imgui_impl_opengl3.cpp ./extra_symbols.txt
 //
-// More info:
 //   https://github.com/dearimgui/gl3w_stripped
 //   https://github.com/ocornut/imgui/issues/4445
 //-----------------------------------------------------------------------------
@@ -56,7 +39,6 @@
 #ifndef __gl3w_h_
 #define __gl3w_h_
 
-// Adapted from KHR/khrplatform.h to avoid including entire file.
 #ifndef __khrplatform_h_
 typedef          float         khronos_float_t;
 typedef signed   char          khronos_int8_t;
@@ -724,15 +706,11 @@ static int is_library_loaded(const char* name, void** lib)
 
 static int open_libs(void)
 {
-    // On Linux we have two APIs to get process addresses: EGL and GLX.
-    // EGL is supported under both X11 and Wayland, whereas GLX is X11-specific.
 
     libgl = NULL;
     libegl = NULL;
     libglx = NULL;
 
-    // First check what's already loaded, the windowing library might have
-    // already loaded either EGL or GLX and we want to use the same one.
 
     if (is_library_loaded("libEGL.so.1", &libegl) ||
         is_library_loaded("libGLX.so.0", &libglx)) {
@@ -750,10 +728,7 @@ static int open_libs(void)
     if (is_library_loaded("libGL.so.3", &libgl))
         return GL3W_OK;
 
-    // Neither is already loaded, so we have to load one.  Try EGL first
-    // because it is supported under both X11 and Wayland.
 
-    // Load OpenGL + EGL
     libgl = dlopen("libOpenGL.so.0", RTLD_LAZY | RTLD_LOCAL);
     libegl = dlopen("libEGL.so.1", RTLD_LAZY | RTLD_LOCAL);
     if (libgl && libegl)
@@ -761,8 +736,6 @@ static int open_libs(void)
     else
         close_libgl();
 
-    // Fall back to legacy libGL, which includes GLX
-    // While most systems use libGL.so.1, NetBSD seems to use that libGL.so.3. See https://github.com/ocornut/imgui/issues/6983
     libgl = dlopen("libGL.so", RTLD_LAZY | RTLD_LOCAL);
     if (!libgl)
         libgl = dlopen("libGL.so.1", RTLD_LAZY | RTLD_LOCAL);
@@ -800,9 +773,6 @@ static GL3WglProc get_proc(const char* proc)
 {
     GL3WglProc res = NULL;
 
-    // Before EGL version 1.5, eglGetProcAddress doesn't support querying core
-    // functions and may return a dummy function if we try, so try to load the
-    // function from the GL library directly first.
     if (libegl)
         *(void**)(&res) = dlsym(libgl, proc);
 
@@ -826,7 +796,6 @@ static int parse_version(void)
     glGetIntegerv(GL_MINOR_VERSION, &version.minor);
     if (version.major == 0 && version.minor == 0)
     {
-        // Query GL_VERSION in desktop GL 2.x, the string will start with "<major>.<minor>"
         if (const char* gl_version = (const char*)glGetString(GL_VERSION))
             sscanf(gl_version, "%d.%d", &version.major, &version.minor);
     }

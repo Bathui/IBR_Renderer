@@ -7,8 +7,6 @@
 
 class ImageResource;
 
-// Stores the grayscale depth data used to displace the image mesh.
-// Depth values are normalized: 0 is far, 1 is near.
 class DepthMap {
 public:
     void generate(const ImageResource& image, float luminanceInfluence, int smoothingIterations, bool invertDepth);
@@ -21,9 +19,7 @@ public:
     bool savePreviewPng(const std::string& outputPath);
     void destroyTexture();
 
-    // Bilinear lookup so the mesh resolution can differ from the depth image resolution.
     float sample(float u, float v) const;
-    // Nearest-neighbor lookup: snaps to the closest texel with no blending.
     float sampleNearest(float u, float v) const;
     int width() const { return width_; }
     int height() const { return height_; }

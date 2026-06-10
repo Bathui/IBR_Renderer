@@ -1,5 +1,3 @@
-/// @ref simd
-/// @file glm/simd/geometric.h
 
 #pragma once
 

@@ -30,7 +30,6 @@
 
 namespace {
 
-// Small utility callbacks/helpers used by the window and UI layer.
 void glfwErrorCallback(int error, const char* description) {
     std::cerr << "GLFW error " << error << ": " << description << "\n";
 }
@@ -85,15 +84,12 @@ std::string openFolderDialog(const char* title) {
     if (SUCCEEDED(hrInit)) {
         CoUninitialize();
     }
-    // Replace backslashes with forward slashes for consistency
     std::replace(result.begin(), result.end(), '\\', '/');
     return result;
 }
 
 const char* interpolationModeNames[] = { "Nearest", "Bilinear", "Quadrilinear" };
 
-// All tweakable UI values live in one place so the renderer, mesh builder,
-// and depth editor can stay focused on their own jobs.
 struct DemoSettings {
     std::string imagePath;
     std::string depthPath;
@@ -113,7 +109,6 @@ struct DemoSettings {
     float brushDepth = 0.85f;
     float brushStrength = 0.35f;
 
-    // Multi-slab settings
     std::string bundlePath = "Input_Images/Stanford_Dragon";
     int interpolationMode = 1; // 0=Nearest, 1=Bilinear, 2=Quadrilinear
     bool multiSlabActive = false;
@@ -123,7 +118,6 @@ struct DemoSettings {
 
 class Application {
 public:
-    // Create renderer resources and optionally preload an image path passed from main().
     bool init(const std::string& inputPath) {
         settings_.imagePath = inputPath;
         if (!renderer_.init()) {
@@ -136,7 +130,6 @@ public:
     }
 
     void shutdown() {
-        // Clean up multi-slab resources.
         for (auto& slab : slabs_) {
             slab.destroy();
         }
@@ -150,7 +143,6 @@ public:
 
     void tick() {
         if (settings_.multiSlabActive && !slabs_.empty()) {
-            // Multi-slab path.
             if (multiSlabMeshDirty_) {
                 rebuildAllSlabMeshes();
             }
@@ -162,7 +154,6 @@ public:
                 }
             }
         } else {
-            // Original single-slab path.
             if (depth_.valid() && depth_.dirty()) {
                 depth_.updatePreviewTexture();
             }
@@ -179,7 +170,6 @@ public:
     }
 
     void drawMainCanvas(int displayW, int displayH) const {
-        // The warp result is drawn on the main window, not inside an ImGui image widget.
         bool ready = settings_.multiSlabActive ? anySlabReady() : sceneReady();
         if (ready) {
             renderer_.target().blitToDefaultFramebuffer(displayW, displayH);
@@ -203,11 +193,9 @@ public:
 
 private:
     // ========================================================================
-    //  Multi-slab management
     // ========================================================================
 
     void loadBundleScene(const std::string& bundleDir) {
-        // Clean up any existing slabs.
         for (auto& slab : slabs_) {
             slab.destroy();
         }
@@ -244,7 +232,6 @@ private:
         if (loadedCount > 0) {
             settings_.multiSlabActive = true;
             multiSlabMeshDirty_ = true;
-            // Adjust camera defaults for multi-slab viewing.
             settings_.camera.yaw = 0.0f;
             settings_.camera.pitch = 0.0f;
             settings_.camera.zoom = 2.5f;
@@ -323,13 +310,11 @@ private:
             }
         }
         
-        // Interpolation mode selector.
         ImGui::Combo("Interpolation", &settings_.interpolationMode, interpolationModeNames, 3);
 
         if (settings_.multiSlabActive && !slabs_.empty()) {
             ImGui::Text("Active slabs: %d", static_cast<int>(slabs_.size()));
 
-            // Show which slab(s) are currently selected.
             SlabSelection sel = selectClosestSlabs(slabs_, settings_.camera.yaw, settings_.camera.pitch);
             if (sel.primaryIdx >= 0) {
                 ImGui::Text("Primary:   [%s] (%.1f deg)",
@@ -343,7 +328,6 @@ private:
                 }
             }
 
-            // Individual slab info.
             if (ImGui::TreeNode("Slab Details")) {
                 for (int i = 0; i < static_cast<int>(slabs_.size()); ++i) {
                     const auto& s = slabs_[i];
@@ -359,10 +343,8 @@ private:
     }
 
     // ========================================================================
-    //  Original single-slab controls (kept for backward compatibility)
     // ========================================================================
 
-    // Fallback depth is only for quick testing. A real depth image usually gives better results.
     void regenerateDepth() {
         if (!image_.valid()) {
             status_ = "Load an RGB image first.";
@@ -415,12 +397,10 @@ private:
     }
 
     bool sceneReady() const {
-        // Rendering needs both inputs and a mesh that has already been uploaded.
         return image_.valid() && depth_.matchesSize(image_.width(), image_.height()) && mesh_.indexCount() > 0;
     }
 
     bool inputsReadyForMesh() const {
-        // The RGB and depth maps must match pixel dimensions because UVs are shared.
         return image_.valid() && depth_.matchesSize(image_.width(), image_.height());
     }
 
@@ -438,7 +418,6 @@ private:
             status_ = "Load matching RGB/depth images before exporting.";
             return;
         }
-        // The actual save happens after the next render pass, so the exported image matches the current view.
         exportResultRequested_ = true;
         status_ = "Exporting current render...";
     }
@@ -457,7 +436,6 @@ private:
 
     void drawInputControls() {
         if (settings_.multiSlabActive) {
-            // In multi-slab mode, the single-image input section is hidden.
             return;
         }
 
@@ -465,7 +443,6 @@ private:
             return;
         }
 
-        // RGB image controls: typed path, manual load, or native Windows file dialog.
         char pathBuffer[512] = {};
         std::snprintf(pathBuffer, sizeof(pathBuffer), "%s", settings_.imagePath.c_str());
         ImGui::SetNextItemWidth(420.0f);
@@ -486,7 +463,6 @@ private:
             }
         }
 
-        // Depth image controls mirror the RGB path controls. The depth map is read as grayscale.
         char depthPathBuffer[512] = {};
         std::snprintf(depthPathBuffer, sizeof(depthPathBuffer), "%s", settings_.depthPath.c_str());
         ImGui::SetNextItemWidth(420.0f);
@@ -511,7 +487,6 @@ private:
             ImGui::TextWrapped("%s", status_.c_str());
         }
 
-        // These only affect the optional generated fallback depth map.
         ImGui::SliderFloat("Luminance influence", &settings_.luminanceInfluence, 0.0f, 0.75f);
         ImGui::SliderInt("Generation smoothing", &settings_.smoothingIterations, 0, 8);
         ImGui::Checkbox("Invert depth on load/generation", &settings_.invertDepth);
@@ -536,14 +511,12 @@ private:
             return;
         }
 
-        // Geometry controls rebuild the mesh because they change vertex positions or triangle removal.
         if (ImGui::SliderFloat("Depth scale", &settings_.depthScale, -1.25f, 1.25f)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderFloat("Depth bias", &settings_.depthBias, -1.0f, 1.0f)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderFloat("Depth tear threshold", &settings_.tearThreshold, 0.0f, 1.0f)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderFloat("Background cutoff", &settings_.backgroundCutoff, 0.0f, 1.0f, "%.3f")) markMeshDirtyIfInputsReady();
         if (ImGui::SliderInt("Mesh columns", &settings_.meshCols, 16, 320)) markMeshDirtyIfInputsReady();
         if (ImGui::SliderInt("Mesh rows", &settings_.meshRows, 16, 240)) markMeshDirtyIfInputsReady();
-        // Camera/background controls affect rendering only, so they do not need a mesh rebuild.
         ImGui::ColorEdit3("Background color", glm::value_ptr(settings_.camera.bgColor));
         ImGui::Checkbox("Wireframe", &settings_.camera.wireframe);
         ImGui::SameLine();
@@ -552,7 +525,6 @@ private:
         }
         ImGui::Separator();
 
-        // In multi-slab mode, extend the slider ranges for full orbiting.
         if (settings_.multiSlabActive) {
             ImGui::SliderFloat("Yaw",   &settings_.camera.yaw,   -180.0f, 180.0f);
             ImGui::SliderFloat("Pitch", &settings_.camera.pitch,  -90.0f,  90.0f);
@@ -564,7 +536,6 @@ private:
         ImGui::SliderFloat2("Pan", glm::value_ptr(settings_.camera.pan), -0.8f, 0.8f);
         ImGui::SliderFloat("Perspective/FOV", &settings_.camera.fov, 18.0f, 75.0f);
 
-        // Status line at the bottom of warp controls.
         if (!status_.empty()) {
             ImGui::TextWrapped("%s", status_.c_str());
         }
@@ -589,7 +560,6 @@ private:
         ImGui::Separator();
 
         if (settings_.multiSlabActive && !slabs_.empty()) {
-            // Multi-slab mode: show thumbnails of all loaded slabs.
             ImGui::Text("Slab Thumbnails");
             for (int i = 0; i < static_cast<int>(slabs_.size()); ++i) {
                 auto& slab = slabs_[i];
@@ -625,11 +595,9 @@ private:
                 }
             }
         } else {
-            // Original single-slab debug views.
             ImGui::Text("Input Images");
             ImGui::Columns(2, "debug_views", false);
 
-            // The debug previews are deliberately kept in the UI; the actual warp appears on the main canvas.
             ImGui::Text("Original image");
             if (image_.valid()) {
                 const ImVec2 imagePreviewSize = fitSize(static_cast<float>(image_.width()), static_cast<float>(image_.height()), itemW, itemH);
@@ -644,7 +612,6 @@ private:
                 const ImVec2 depthPreviewSize = fitSize(static_cast<float>(depth_.width()), static_cast<float>(depth_.height()), itemW, itemH);
                 ImVec2 depthPos = ImGui::GetCursorScreenPos();
 
-                // InvisibleButton makes the preview an active drag target, so painting does not move the ImGui window.
                 ImGui::InvisibleButton("depth_paint_canvas",
                                        depthPreviewSize,
                                        ImGuiButtonFlags_MouseButtonLeft | ImGuiButtonFlags_MouseButtonRight);
@@ -674,7 +641,6 @@ private:
             return;
         }
 
-        // Convert from preview-window coordinates back to full-resolution depth-map coordinates.
         const float imgX = (localX / imageSize.x) * static_cast<float>(depth_.width());
         const float imgY = (localY / imageSize.y) * static_cast<float>(depth_.height());
         depth_.paintAt(imgX, imgY, settings_.brushRadius, settings_.brushDepth, settings_.brushStrength, smoothMode);
@@ -705,7 +671,6 @@ private:
     bool meshDirty_ = true;
     bool exportResultRequested_ = false;
 
-    // Multi-slab state.
     std::vector<LightFieldSlab> slabs_;
     bool multiSlabMeshDirty_ = true;
 };
@@ -713,7 +678,6 @@ private:
 }  // namespace
 
 int runInteractiveApp(const std::string& inputPath) {
-    // Window/OpenGL setup.
     glfwSetErrorCallback(glfwErrorCallback);
     if (!glfwInit()) {
         return EXIT_FAILURE;
@@ -738,7 +702,6 @@ int runInteractiveApp(const std::string& inputPath) {
         return EXIT_FAILURE;
     }
 
-    // ImGui setup.
     IMGUI_CHECKVERSION();
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -757,7 +720,6 @@ int runInteractiveApp(const std::string& inputPath) {
         return EXIT_FAILURE;
     }
 
-    // Main loop: update data, draw the warped scene, then draw the UI overlay.
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
         app.tick();
@@ -782,7 +744,6 @@ int runInteractiveApp(const std::string& inputPath) {
         glfwSwapBuffers(window);
     }
 
-    // Cleanup order mirrors setup order.
     app.shutdown();
     ImGui_ImplOpenGL3_Shutdown();
     ImGui_ImplGlfw_Shutdown();

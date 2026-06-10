@@ -10,7 +10,6 @@
 
 namespace {
 
-// A tiny blur used for generated depth and the smoothing brush.
 void smoothValues(std::vector<float>& values, int width, int height, int iterations) {
     if (iterations <= 0) {
         return;
@@ -41,12 +40,10 @@ void smoothValues(std::vector<float>& values, int width, int height, int iterati
 }  // namespace
 
 void DepthMap::generate(const ImageResource& image, float luminanceInfluence, int smoothingIterations, bool invertDepth) {
-    // Allocate one floating-point depth value for each image pixel.
     width_ = image.width();
     height_ = image.height();
     values_.assign(width_ * height_, 0.0f);
 
-    // This fallback is intentionally simple; loading a hand-made or estimated depth map is preferred.
     const float aspect = static_cast<float>(width_) / static_cast<float>(height_);
     for (int y = 0; y < height_; ++y) {
         const float ny = (static_cast<float>(y) / static_cast<float>(height_ - 1)) * 2.0f - 1.0f;
@@ -67,12 +64,10 @@ void DepthMap::generate(const ImageResource& image, float luminanceInfluence, in
 }
 
 void DepthMap::loadFromImage(const ImageResource& image, bool invertDepth) {
-    // A loaded depth image becomes the authoritative depth map for the current scene.
     width_ = image.width();
     height_ = image.height();
     values_.assign(width_ * height_, 0.0f);
 
-    // Any color image can be used as a depth map by reading its luminance.
     for (int y = 0; y < height_; ++y) {
         for (int x = 0; x < width_; ++x) {
             float d = image.luminanceAt(x, y);
@@ -84,7 +79,6 @@ void DepthMap::loadFromImage(const ImageResource& image, bool invertDepth) {
 }
 
 void DepthMap::clear() {
-    // Clear CPU data and release the preview texture together.
     width_ = 0;
     height_ = 0;
     values_.clear();
@@ -111,13 +105,11 @@ void DepthMap::paintAt(float imgX, float imgY, float radius, float targetDepth, 
     const int minY = std::max(0, static_cast<int>(std::floor(imgY - radius)));
     const int maxY = std::min(height_ - 1, static_cast<int>(std::ceil(imgY + radius)));
 
-    // Smoothing reads from a copy so each pixel uses the same original neighborhood.
     std::vector<float> oldDepth;
     if (smoothMode) {
         oldDepth = values_;
     }
 
-    // Circular brush with linear falloff from the center to the radius.
     for (int y = minY; y <= maxY; ++y) {
         for (int x = minX; x <= maxX; ++x) {
             const float dx = static_cast<float>(x) - imgX;
@@ -154,7 +146,6 @@ float DepthMap::sample(float u, float v) const {
     if (!valid()) {
         return 0.0f;
     }
-    // Bilinear filtering avoids blocky depth when the mesh is lower resolution than the image.
     const float x = std::clamp(u, 0.0f, 1.0f) * static_cast<float>(width_ - 1);
     const float y = std::clamp(v, 0.0f, 1.0f) * static_cast<float>(height_ - 1);
     const int x0 = static_cast<int>(std::floor(x));
@@ -174,7 +165,6 @@ float DepthMap::sampleNearest(float u, float v) const {
     if (!valid()) {
         return 0.0f;
     }
-    // Snap to the nearest integer texel — no blending at all.
     const int x = std::clamp(static_cast<int>(std::round(std::clamp(u, 0.0f, 1.0f) * static_cast<float>(width_ - 1))),
                              0, width_ - 1);
     const int y = std::clamp(static_cast<int>(std::round(std::clamp(v, 0.0f, 1.0f) * static_cast<float>(height_ - 1))),
@@ -187,7 +177,6 @@ void DepthMap::buildPreviewCpu() {
         previewRgba_.clear();
         return;
     }
-    // Convert normalized float depth back to an RGBA grayscale texture for ImGui preview/export.
     previewRgba_.resize(width_ * height_ * 4);
     for (int i = 0; i < width_ * height_; ++i) {
         const auto v = static_cast<unsigned char>(std::clamp(values_[i], 0.0f, 1.0f) * 255.0f);
@@ -205,7 +194,6 @@ void DepthMap::updatePreviewTexture() {
     }
     buildPreviewCpu();
 
-    // Recreate the preview texture if a newly loaded depth map has a different size.
     const bool needsNewStorage = !previewTexture_ || previewTextureWidth_ != width_ || previewTextureHeight_ != height_;
     if (needsNewStorage) {
         if (previewTexture_) {
