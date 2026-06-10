@@ -1,3 +1,4 @@
 # IBR Viewer
+**Name**: Hui Cui
 
-[Project page](https://bathui.github.io/IBR_Renderer/)
+**Website Link:** [Project page](https://bathui.github.io/IBR_Renderer/)
